@@ -1,0 +1,161 @@
+import {
+  BadGatewayException,
+  GatewayTimeoutException,
+  InternalServerErrorException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { AiService } from './ai.service.js';
+
+describe('AiService', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function createService(config: Record<string, string | undefined>) {
+    const configService = {
+      get: vi.fn((key: string) => config[key]),
+    } as unknown as ConfigService;
+    return new AiService(configService);
+  }
+
+  it('normalizes a successful OpenRouter response', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 'generation-1',
+          model: 'provider/model',
+          choices: [{ message: { content: 'A concise answer.' } }],
+          usage: { prompt_tokens: 7, completion_tokens: 4, total_tokens: 11 },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      createService({ OPENROUTER_API_KEY: 'test-key' }).generate('Hello'),
+    ).resolves.toEqual({
+      id: 'generation-1',
+      model: 'provider/model',
+      content: 'A concise answer.',
+      usage: { promptTokens: 7, completionTokens: 4, totalTokens: 11 },
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://openrouter.ai/api/v1/chat/completions',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          model: 'openrouter/free',
+          messages: [{ role: 'user', content: 'Hello' }],
+        }),
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+
+  it('sends and normalizes the documented PDF request shape', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 'pdf-generation-1',
+          model: 'free/pdf-model',
+          choices: [{ message: { content: 'HELIOS-47, 18 percent.' } }],
+          usage: { prompt_tokens: 25, completion_tokens: 6, total_tokens: 31 },
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      createService({ OPENROUTER_API_KEY: 'test-key' }).generateWithPdf(
+        'Question',
+        'synthetic.pdf',
+        'data:application/pdf;base64,JVBERi0=',
+      ),
+    ).resolves.toEqual({
+      id: 'pdf-generation-1',
+      model: 'free/pdf-model',
+      content: 'HELIOS-47, 18 percent.',
+      usage: { promptTokens: 25, completionTokens: 6, totalTokens: 31 },
+    });
+
+    const request = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(request.body as string)).toEqual({
+      model: 'openrouter/free',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Question' },
+            {
+              type: 'file',
+              file: {
+                filename: 'synthetic.pdf',
+                file_data: 'data:application/pdf;base64,JVBERi0=',
+              },
+            },
+          ],
+        },
+      ],
+      plugins: [{ id: 'file-parser', pdf: { engine: 'cloudflare-ai' } }],
+      max_tokens: 100,
+    });
+  });
+
+  it('rejects a missing API key without calling the provider', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(createService({}).generate('Hello')).rejects.toBeInstanceOf(
+      InternalServerErrorException,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('sanitizes non-successful provider responses', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(new Response('sensitive details', { status: 402 })),
+    );
+    const error = await createService({ OPENROUTER_API_KEY: 'test-key' })
+      .generate('Hello')
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(BadGatewayException);
+    expect((error as BadGatewayException).getResponse()).toEqual({
+      message: 'AI provider request failed',
+      providerStatus: 402,
+    });
+  });
+
+  it('handles network failures', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('network')));
+    await expect(
+      createService({ OPENROUTER_API_KEY: 'test-key' }).generate('Hello'),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+  });
+
+  it('handles request timeouts', async () => {
+    const timeout = new Error('timed out');
+    timeout.name = 'TimeoutError';
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(timeout));
+    await expect(
+      createService({ OPENROUTER_API_KEY: 'test-key' }).generate('Hello'),
+    ).rejects.toBeInstanceOf(GatewayTimeoutException);
+  });
+
+  it.each([
+    new Response('not JSON', { status: 200 }),
+    new Response(JSON.stringify({ id: 'generation-1', choices: [] }), {
+      status: 200,
+    }),
+  ])('rejects malformed provider responses', async (response) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
+    await expect(
+      createService({ OPENROUTER_API_KEY: 'test-key' }).generate('Hello'),
+    ).rejects.toBeInstanceOf(BadGatewayException);
+  });
+});
