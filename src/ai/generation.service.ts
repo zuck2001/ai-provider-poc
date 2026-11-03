@@ -7,10 +7,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { readFile, stat } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
 import { Repository } from 'typeorm';
-import { AiService, type AiResponse } from './ai.service.js';
 import { AiGeneration } from './entities/ai-generation.entity.js';
 import type { PromptTemplate } from './entities/prompt-template.entity.js';
 import { PromptTemplateService } from './prompt-template.service.js';
+import { AiProvider, type AiResponse } from './providers/ai-provider.js';
 
 export interface PersistedAiResponse extends AiResponse {
   generationId: string;
@@ -19,6 +19,7 @@ export interface PersistedAiResponse extends AiResponse {
 export interface StoredGenerationResponse {
   id: string;
   status: 'completed' | 'failed';
+  provider: string | null;
   providerRequestId: string | null;
   model: string | null;
   responseText: string | null;
@@ -36,11 +37,12 @@ const SYNTHETIC_PDF_PATH = resolve(
   'synthetic-rd-project.pdf',
 );
 const MAX_PDF_SIZE_BYTES = 1024 * 1024;
+const PDF_ANALYSIS_MAX_TOKENS = 100;
 
 @Injectable()
 export class GenerationService {
   constructor(
-    private readonly provider: AiService,
+    private readonly provider: AiProvider,
     private readonly templates: PromptTemplateService,
     @InjectRepository(AiGeneration)
     private readonly repository: Repository<AiGeneration>,
@@ -68,17 +70,20 @@ export class GenerationService {
       throw new BadRequestException('Synthetic PDF has an invalid signature');
     }
 
-    const dataUrl = `data:application/pdf;base64,${pdf.toString('base64')}`;
     return this.generateAndPersist(
       PDF_ANALYSIS_PROMPT,
       null,
       () =>
         this.provider.generateWithPdf(
           PDF_ANALYSIS_PROMPT,
-          basename(pdfPath),
-          dataUrl,
+          {
+            filename: basename(pdfPath),
+            mimeType: 'application/pdf',
+            base64: pdf.toString('base64'),
+          },
+          { maxTokens: PDF_ANALYSIS_MAX_TOKENS },
         ),
-      { inputMode: 'base64', parserRequested: 'cloudflare-ai' },
+      { inputMode: 'base64', parserRequested: this.provider.pdfParser },
     );
   }
 
@@ -98,6 +103,7 @@ export class GenerationService {
     return {
       id: generation.id,
       status: generation.status,
+      provider: generation.provider,
       providerRequestId: generation.providerRequestId,
       model: generation.model,
       responseText: generation.responseText,
@@ -114,13 +120,14 @@ export class GenerationService {
     generate: () => Promise<AiResponse> = () => this.provider.generate(prompt),
     metadata: {
       inputMode?: string;
-      parserRequested?: string;
+      parserRequested?: string | null;
     } = {},
   ): Promise<PersistedAiResponse> {
     try {
       const result = await generate();
       const generation = await this.repository.save(
         this.repository.create({
+          provider: this.provider.name,
           providerRequestId: result.id,
           promptTemplateId: template?.id ?? null,
           model: result.model,
@@ -136,6 +143,7 @@ export class GenerationService {
     } catch (error) {
       await this.repository.save(
         this.repository.create({
+          provider: this.provider.name,
           providerRequestId: null,
           promptTemplateId: template?.id ?? null,
           model: null,

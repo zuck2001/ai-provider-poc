@@ -6,9 +6,9 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AiService } from './ai.service.js';
+import { OpenRouterAiProvider } from './openrouter.provider.js';
 
-describe('AiService', () => {
+describe('OpenRouterAiProvider', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -17,7 +17,7 @@ describe('AiService', () => {
     const configService = {
       get: vi.fn((key: string) => config[key]),
     } as unknown as ConfigService;
-    return new AiService(configService);
+    return new OpenRouterAiProvider(configService);
   }
 
   it('normalizes a successful OpenRouter response', async () => {
@@ -72,8 +72,12 @@ describe('AiService', () => {
     await expect(
       createService({ OPENROUTER_API_KEY: 'test-key' }).generateWithPdf(
         'Question',
-        'synthetic.pdf',
-        'data:application/pdf;base64,JVBERi0=',
+        {
+          filename: 'synthetic.pdf',
+          mimeType: 'application/pdf',
+          base64: 'JVBERi0=',
+        },
+        { maxTokens: 100 },
       ),
     ).resolves.toEqual({
       id: 'pdf-generation-1',
@@ -157,5 +161,37 @@ describe('AiService', () => {
     await expect(
       createService({ OPENROUTER_API_KEY: 'test-key' }).generate('Hello'),
     ).rejects.toBeInstanceOf(BadGatewayException);
+  });
+
+  it('exposes its provider name and PDF parser', () => {
+    const provider = createService({});
+    expect(provider.name).toBe('openrouter');
+    expect(provider.pdfParser).toBe('cloudflare-ai');
+  });
+
+  it('honours a configured model and an explicit token limit', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 'generation-2',
+          model: 'custom/model',
+          choices: [{ message: { content: 'ok' } }],
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await createService({
+      OPENROUTER_API_KEY: 'test-key',
+      OPENROUTER_MODEL: 'custom/model',
+    }).generate('Hello', { maxTokens: 50 });
+
+    const request = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(request.body as string)).toEqual({
+      model: 'custom/model',
+      messages: [{ role: 'user', content: 'Hello' }],
+      max_tokens: 50,
+    });
   });
 });

@@ -6,7 +6,7 @@ import {
   ManyToOne,
   PrimaryGeneratedColumn,
 } from 'typeorm';
-import type { AiUsage } from '../ai.service.js';
+import type { AiUsage } from '../providers/ai-provider.js';
 import { PromptTemplate } from './prompt-template.entity.js';
 
 export type GenerationStatus = 'completed' | 'failed';
@@ -15,6 +15,9 @@ export type GenerationStatus = 'completed' | 'failed';
 export class AiGeneration {
   @PrimaryGeneratedColumn('uuid')
   id: string;
+
+  @Column('varchar', { nullable: true })
+  provider: string | null;
 
   @Column('varchar', { nullable: true })
   providerRequestId: string | null;
