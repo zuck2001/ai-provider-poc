@@ -18,7 +18,10 @@
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
     "test:debug": "vitest --inspect-brk --no-file-parallelism",
-    "test:e2e": "vitest run --config ./vitest.config.e2e.ts"
+    "test:e2e": "vitest run --config ./vitest.config.e2e.ts",
+    "benchmark:pdf:generate": "node scripts/generate-large-pdf.mjs",
+    "benchmark:pdf": "node scripts/benchmark-large-pdf.mjs",
+    "test:large-pdf:openrouter": "node --max-old-space-size=1024 scripts/test-large-pdf-openrouter.mjs"
   },
   "dependencies": {
     "@nestjs/common": "^12.0.1",
