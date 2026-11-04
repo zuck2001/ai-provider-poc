@@ -55,10 +55,8 @@ GenerationService
     ▼
 AiProvider (abstract strategy, selected by AI_PROVIDER)
     │
-    └─ OpenRouterAiProvider ── native fetch + server-side Bearer authentication
-           │
-           ▼
-       OpenRouter Chat Completions
+    ├─ OpenRouterAiProvider ── native fetch + Bearer auth ──► OpenRouter Chat Completions
+    └─ OpenAiProvider ──────── native fetch + Bearer auth ──► OpenAI Chat Completions
     │
     ▼
 Normalized response ──► ai_generations ──► retrieval endpoint
@@ -99,10 +97,16 @@ Edit `.env` locally and replace the API-key placeholder. Never commit `.env`.
 AI_PROVIDER=openrouter
 OPENROUTER_API_KEY=your_openrouter_api_key
 OPENROUTER_MODEL=openrouter/free
+OPENAI_API_KEY=your_openai_api_key
+OPENAI_MODEL=
 PORT=3000
 ```
 
-`AI_PROVIDER` is optional, case-insensitive, and defaults to `openrouter`, currently the only provider. An unknown value stops the application at startup. `OPENROUTER_MODEL` is optional in code and defaults to `openrouter/free`. Keep it set to `openrouter/free` for the verified zero-model-cost PoC path. The PDF request explicitly selects `cloudflare-ai` and does not configure a paid model fallback or `mistral-ocr`.
+`AI_PROVIDER` is optional, case-insensitive, and defaults to `openrouter`. Set it to `openai` to call OpenAI directly. An unknown value stops the application at startup.
+
+With `AI_PROVIDER=openai`, `OPENAI_API_KEY` and `OPENAI_MODEL` are both required; there is no default model. OpenAI reads PDFs natively, so no parser is requested and `parserRequested` is stored as `null`. Token limits are sent as `max_completion_tokens`. On reasoning models, hidden reasoning tokens count against that limit, so `/ai/analyze-pdf` (limited to 100 tokens) can return an empty answer. Use a non-reasoning model for that endpoint.
+
+ `OPENROUTER_MODEL` is optional in code and defaults to `openrouter/free`. Keep it set to `openrouter/free` for the verified zero-model-cost PoC path. The PDF request explicitly selects `cloudflare-ai` and does not configure a paid model fallback or `mistral-ocr`.
 
 ## Run locally
 

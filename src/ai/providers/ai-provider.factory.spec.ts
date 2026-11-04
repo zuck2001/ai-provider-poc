@@ -2,12 +2,15 @@ import { ConfigService } from '@nestjs/config';
 import { describe, expect, it, vi } from 'vitest';
 import { AiProvider } from './ai-provider.js';
 import { aiProviderFactory, selectAiProvider } from './ai-provider.factory.js';
+import { OpenAiProvider } from './openai.provider.js';
 import { OpenRouterAiProvider } from './openrouter.provider.js';
 
 describe('AI provider selection', () => {
   const config = (values: Record<string, string | undefined>) =>
     ({ get: vi.fn((key: string) => values[key]) }) as unknown as ConfigService;
   const openRouter = new OpenRouterAiProvider(config({}));
+  const openAi = new OpenAiProvider(config({}));
+  const both = [openRouter, openAi];
 
   it('defaults to OpenRouter when AI_PROVIDER is unset or blank', () => {
     expect(selectAiProvider(undefined, [openRouter])).toBe(openRouter);
@@ -15,7 +18,9 @@ describe('AI provider selection', () => {
   });
 
   it('selects the provider whose name matches AI_PROVIDER', () => {
-    expect(selectAiProvider('openrouter', [openRouter])).toBe(openRouter);
+    expect(selectAiProvider('openrouter', both)).toBe(openRouter);
+    expect(selectAiProvider('openai', both)).toBe(openAi);
+    expect(selectAiProvider('OpenAI', both)).toBe(openAi);
   });
 
   it('matches AI_PROVIDER case-insensitively', () => {
@@ -31,8 +36,8 @@ describe('AI provider selection', () => {
   });
 
   it('fails fast on an unknown AI_PROVIDER', () => {
-    expect(() => selectAiProvider('nope', [openRouter])).toThrow(
-      'Unknown AI_PROVIDER "nope". Expected one of: openrouter',
+    expect(() => selectAiProvider('nope', both)).toThrow(
+      'Unknown AI_PROVIDER "nope". Expected one of: openrouter, openai',
     );
   });
 

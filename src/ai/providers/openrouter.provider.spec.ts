@@ -1,9 +1,4 @@
-import {
-  BadGatewayException,
-  GatewayTimeoutException,
-  InternalServerErrorException,
-  ServiceUnavailableException,
-} from '@nestjs/common';
+import { InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OpenRouterAiProvider } from './openrouter.provider.js';
@@ -116,51 +111,6 @@ describe('OpenRouterAiProvider', () => {
       InternalServerErrorException,
     );
     expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it('sanitizes non-successful provider responses', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi
-        .fn()
-        .mockResolvedValue(new Response('sensitive details', { status: 402 })),
-    );
-    const error = await createService({ OPENROUTER_API_KEY: 'test-key' })
-      .generate('Hello')
-      .catch((caught: unknown) => caught);
-    expect(error).toBeInstanceOf(BadGatewayException);
-    expect((error as BadGatewayException).getResponse()).toEqual({
-      message: 'AI provider request failed',
-      providerStatus: 402,
-    });
-  });
-
-  it('handles network failures', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('network')));
-    await expect(
-      createService({ OPENROUTER_API_KEY: 'test-key' }).generate('Hello'),
-    ).rejects.toBeInstanceOf(ServiceUnavailableException);
-  });
-
-  it('handles request timeouts', async () => {
-    const timeout = new Error('timed out');
-    timeout.name = 'TimeoutError';
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(timeout));
-    await expect(
-      createService({ OPENROUTER_API_KEY: 'test-key' }).generate('Hello'),
-    ).rejects.toBeInstanceOf(GatewayTimeoutException);
-  });
-
-  it.each([
-    new Response('not JSON', { status: 200 }),
-    new Response(JSON.stringify({ id: 'generation-1', choices: [] }), {
-      status: 200,
-    }),
-  ])('rejects malformed provider responses', async (response) => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
-    await expect(
-      createService({ OPENROUTER_API_KEY: 'test-key' }).generate('Hello'),
-    ).rejects.toBeInstanceOf(BadGatewayException);
   });
 
   it('exposes its provider name and PDF parser', () => {

@@ -1,12 +1,13 @@
 import type { FactoryProvider } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AiProvider } from './ai-provider.js';
+import { OpenAiProvider } from './openai.provider.js';
 import { OpenRouterAiProvider } from './openrouter.provider.js';
 
 export const DEFAULT_AI_PROVIDER = 'openrouter';
 
 /** Concrete strategies that can be selected through `AI_PROVIDER`. */
-export const AI_PROVIDER_CLASSES = [OpenRouterAiProvider];
+export const AI_PROVIDER_CLASSES = [OpenRouterAiProvider, OpenAiProvider];
 
 export function selectAiProvider(
   configured: string | undefined,
