@@ -6,19 +6,14 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import {
+  AiProvider,
+  type AiResponse,
+  type GenerateOptions,
+  type PdfAttachment,
+} from './ai-provider.js';
 
-export interface AiUsage {
-  promptTokens?: number;
-  completionTokens?: number;
-  totalTokens?: number;
-}
-
-export interface AiResponse {
-  id: string;
-  model: string;
-  content: string;
-  usage: AiUsage | null;
-}
+const PDF_ENGINE = 'cloudflare-ai';
 
 interface OpenRouterResponse {
   id?: unknown;
@@ -36,36 +31,53 @@ interface OpenRouterResponse {
 }
 
 @Injectable()
-export class AiService {
-  constructor(private readonly configService: ConfigService) {}
+export class OpenRouterAiProvider extends AiProvider {
+  readonly name = 'openrouter';
+  readonly pdfParser = PDF_ENGINE;
 
-  async generate(prompt: string): Promise<AiResponse> {
-    return this.request({
-      messages: [{ role: 'user', content: prompt }],
-    });
+  constructor(private readonly configService: ConfigService) {
+    super();
   }
 
-  async generateWithPdf(
+  generate(prompt: string, opts?: GenerateOptions): Promise<AiResponse> {
+    return this.request(
+      { messages: [{ role: 'user', content: prompt }] },
+      opts,
+    );
+  }
+
+  generateWithPdf(
     prompt: string,
-    filename: string,
-    fileData: string,
+    file: PdfAttachment,
+    opts?: GenerateOptions,
   ): Promise<AiResponse> {
-    return this.request({
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: prompt },
-            { type: 'file', file: { filename, file_data: fileData } },
-          ],
-        },
-      ],
-      plugins: [{ id: 'file-parser', pdf: { engine: 'cloudflare-ai' } }],
-      max_tokens: 100,
-    });
+    return this.request(
+      {
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt },
+              {
+                type: 'file',
+                file: {
+                  filename: file.filename,
+                  file_data: `data:${file.mimeType};base64,${file.base64}`,
+                },
+              },
+            ],
+          },
+        ],
+        plugins: [{ id: 'file-parser', pdf: { engine: PDF_ENGINE } }],
+      },
+      opts,
+    );
   }
 
-  private async request(payload: Record<string, unknown>): Promise<AiResponse> {
+  private async request(
+    payload: Record<string, unknown>,
+    opts?: GenerateOptions,
+  ): Promise<AiResponse> {
     const apiKey = this.configService.get<string>('OPENROUTER_API_KEY');
     const model =
       this.configService.get<string>('OPENROUTER_MODEL') || 'openrouter/free';
@@ -86,6 +98,7 @@ export class AiService {
         body: JSON.stringify({
           model,
           ...payload,
+          ...(opts?.maxTokens !== undefined && { max_tokens: opts.maxTokens }),
         }),
         signal: AbortSignal.timeout(30_000),
       });

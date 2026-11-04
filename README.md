@@ -53,16 +53,20 @@ GenerationService
     ├──────────────► PromptTemplateService ──► prompt_templates
     │
     ▼
-AiService
-    │ native fetch + server-side Bearer authentication
-    ▼
-OpenRouter Chat Completions
+AiProvider (abstract strategy, selected by AI_PROVIDER)
+    │
+    └─ OpenRouterAiProvider ── native fetch + server-side Bearer authentication
+           │
+           ▼
+       OpenRouter Chat Completions
     │
     ▼
 Normalized response ──► ai_generations ──► retrieval endpoint
 ```
 
-The OpenRouter boundary returns only the provider request ID, actual model, generated text, and token usage. Raw provider responses, credentials, authorization headers, PDF bytes, and Base64 data URLs are not persisted.
+`GenerationService` depends only on the abstract `AiProvider` class in `src/ai/providers/ai-provider.ts`. `AiModule` binds that class to the provider named by `AI_PROVIDER` (see `src/ai/providers/ai-provider.factory.ts`). Each generation records which provider served it in the `provider` column. To add a provider, write a class that extends `AiProvider`, give it a unique `name`, and add it to `AI_PROVIDER_CLASSES`.
+
+The provider boundary returns only the provider request ID, actual model, generated text, and token usage. Raw provider responses, credentials, authorization headers, PDF bytes, and Base64 data URLs are not persisted.
 
 ## Technology stack
 
@@ -92,12 +96,13 @@ Copy-Item .env.example .env
 Edit `.env` locally and replace the API-key placeholder. Never commit `.env`.
 
 ```dotenv
+AI_PROVIDER=openrouter
 OPENROUTER_API_KEY=your_openrouter_api_key
 OPENROUTER_MODEL=openrouter/free
 PORT=3000
 ```
 
-`OPENROUTER_MODEL` is optional in code and defaults to `openrouter/free`. Keep it set to `openrouter/free` for the verified zero-model-cost PoC path. The PDF request explicitly selects `cloudflare-ai` and does not configure a paid model fallback or `mistral-ocr`.
+`AI_PROVIDER` is optional, case-insensitive, and defaults to `openrouter`, currently the only provider. An unknown value stops the application at startup. `OPENROUTER_MODEL` is optional in code and defaults to `openrouter/free`. Keep it set to `openrouter/free` for the verified zero-model-cost PoC path. The PDF request explicitly selects `cloudflare-ai` and does not configure a paid model fallback or `mistral-ocr`.
 
 ## Run locally
 
@@ -253,6 +258,7 @@ Retrieval returns status, provider request ID, actual model, response text, usag
 `ai_generations` contains:
 
 - Internal UUID, distinct from the nullable OpenRouter request ID.
+- Nullable `provider` name of the strategy that served the request (for example `openrouter`); rows created before this column existed are `null`.
 - Nullable exact prompt-template version reference.
 - Actual model returned by OpenRouter for completed requests.
 - Exact rendered prompt text.

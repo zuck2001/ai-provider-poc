@@ -8,17 +8,19 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DataSource, type Repository } from 'typeorm';
-import { AiService } from './ai.service.js';
 import { AiGeneration } from './entities/ai-generation.entity.js';
 import { PromptTemplate } from './entities/prompt-template.entity.js';
 import { GenerationService } from './generation.service.js';
 import { PromptTemplateService } from './prompt-template.service.js';
+import type { AiProvider } from './providers/ai-provider.js';
 
 describe('Generation persistence workflow', () => {
   let dataSource: DataSource;
   let generations: Repository<AiGeneration>;
   let templates: Repository<PromptTemplate>;
   let provider: {
+    name: string;
+    pdfParser: string | null;
     generate: ReturnType<typeof vi.fn>;
     generateWithPdf: ReturnType<typeof vi.fn>;
   };
@@ -38,9 +40,14 @@ describe('Generation persistence workflow', () => {
     templates = dataSource.getRepository(PromptTemplate);
     templateService = new PromptTemplateService(templates);
     await templateService.onModuleInit();
-    provider = { generate: vi.fn(), generateWithPdf: vi.fn() };
+    provider = {
+      name: 'test-provider',
+      pdfParser: 'test-parser',
+      generate: vi.fn(),
+      generateWithPdf: vi.fn(),
+    };
     service = new GenerationService(
-      provider as unknown as AiService,
+      provider as unknown as AiProvider,
       templateService,
       generations,
     );
@@ -94,6 +101,7 @@ describe('Generation persistence workflow', () => {
       ...providerResponse,
     });
     expect(stored).toMatchObject({
+      provider: 'test-provider',
       providerRequestId: 'provider-1',
       promptTemplateId: null,
       model: 'actual/model',
@@ -115,8 +123,12 @@ describe('Generation persistence workflow', () => {
     );
     expect(provider.generateWithPdf).toHaveBeenCalledWith(
       expect.stringContaining('What is the project codename'),
-      'synthetic-rd-project.pdf',
-      expect.stringMatching(/^data:application\/pdf;base64,JVBERi0/),
+      {
+        filename: 'synthetic-rd-project.pdf',
+        mimeType: 'application/pdf',
+        base64: expect.stringMatching(/^JVBERi0/),
+      },
+      { maxTokens: 100 },
     );
     await expect(
       generations.findOneByOrFail({ id: result.generationId }),
@@ -124,8 +136,9 @@ describe('Generation persistence workflow', () => {
       providerRequestId: 'provider-1',
       responseText: 'HELIOS-47, 18 percent.',
       status: 'completed',
+      provider: 'test-provider',
       inputMode: 'base64',
-      parserRequested: 'cloudflare-ai',
+      parserRequested: 'test-parser',
     });
   });
 
@@ -170,8 +183,9 @@ describe('Generation persistence workflow', () => {
       model: null,
       responseText: null,
       usage: null,
+      provider: 'test-provider',
       inputMode: 'base64',
-      parserRequested: 'cloudflare-ai',
+      parserRequested: 'test-parser',
     });
   });
 
@@ -223,6 +237,7 @@ describe('Generation persistence workflow', () => {
     await expect(
       generations.findOneByOrFail({ status: 'failed' }),
     ).resolves.toMatchObject({
+      provider: 'test-provider',
       providerRequestId: null,
       model: null,
       promptText: 'Failed prompt',
@@ -238,6 +253,7 @@ describe('Generation persistence workflow', () => {
       {
         id: created.generationId,
         status: 'completed',
+        provider: 'test-provider',
         providerRequestId: 'provider-1',
         model: 'actual/model',
         responseText: 'Generated answer',
